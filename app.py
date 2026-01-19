@@ -3,7 +3,7 @@ import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from flask import Flask, render_template, request, send_file
+from flask import Flask, render_template, request, send_file, redirect, url_for
 import nepali_datetime
 import webbrowser
 from threading import Timer
@@ -20,6 +20,7 @@ OUTPUT_DIR = os.path.join(BASE_DIR, "outputs")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+# Employee Master Data
 emp_info = {
     160155: {"Name": "tara", "Designation": "Administrative Officer"},
     3812: {"Name": "MADHAV", "Designation": "Administrative Officer"},
@@ -80,7 +81,6 @@ designation_order = [
     "Foreman Driver", "Driver", "Office Helper", "Others"
 ]
 
-# Color map updated to match the image precisely
 colors_map = {
     "Director": "#FF7C70",
     "Manager": "#94B454",
@@ -139,6 +139,10 @@ def index():
             combined = pd.concat(all_dfs, ignore_index=True)
             combined['date_ad'] = combined['Date'].apply(bs_to_ad)
             combined['dt'] = pd.to_datetime(combined['date_ad'].astype(str) + " " + combined['Time'].astype(str), errors="coerce")
+            
+            # Identify Reader Type: 
+            # If 'Attendance Check Point' contains 'outside' -> it is an 'enter' event (returning/entering from outside).
+            # Otherwise -> it is an 'exit' event (leaving/inside reader).
             combined['type'] = combined['Attendance Check Point'].apply(lambda x: 'enter' if 'outside' in str(x).lower() else 'exit')
             combined = combined.dropna(subset=['dt']).sort_values(['ID', 'dt'])
 
@@ -146,40 +150,79 @@ def index():
             for emp_id, g in combined.groupby("ID"):
                 info = emp_info.get(emp_id, {"Name": f"ID-{emp_id}", "Designation": "Others"})
                 total_mins = 0
+                valid_days_count = 0
+                
+                # Group by specific date
                 for _, day_data in g.groupby(g['dt'].dt.date):
                     day_data = day_data.sort_values("dt")
+                    
+                    # --- COUNTING PRESENT DAYS LOGIC ---
+                    if len(day_data) > 1:
+                        # Multiple logs in a day -> Definitely Present
+                        valid_days_count += 1
+                    else:
+                        # Only 1 log in a day
+                        # Check if that single log is from 'Outside' reader (type='enter')
+                        if day_data.iloc[0]['type'] == 'enter':
+                            valid_days_count += 1
+                        # If single log is 'exit' (Inside reader), we do NOT increment valid_days_count
+                    
+                    # --- CALCULATING OUTSIDE MINUTES ---
                     for i in range(len(day_data)-1):
                         curr, nxt = day_data.iloc[i], day_data.iloc[i+1]
+                        # Calculate time between Exit (going out) and Enter (coming back)
                         if curr['type'] == "exit" and nxt['type'] == "enter":
                             diff = (nxt['dt'] - curr['dt']).total_seconds() / 60
-                            if 0 < diff < 600: total_mins += diff
+                            # Filter logical breaks (e.g., < 10 hours)
+                            if 0 < diff < 600: 
+                                total_mins += diff
+                            
                 summary.append({
-                    "ID": emp_id, "Name": info["Name"], "Designation": info["Designation"],
-                    "Days": g['date_ad'].nunique(), "Mins": round(total_mins, 2), "Hrs": round(total_mins/60, 2)
+                    "ID": emp_id, 
+                    "Name": info["Name"], 
+                    "Designation": info["Designation"],
+                    "Days": valid_days_count, 
+                    "Mins": round(total_mins, 2), 
+                    "Hrs": round(total_mins/60, 2)
                 })
 
             res_df = pd.DataFrame(summary)
+            # Add helper column for sorting by designation hierarchy
             res_df['Designation_order'] = res_df['Designation'].apply(lambda x: designation_order.index(x) if x in designation_order else len(designation_order))
-            # Sort exactly like the chart: Designation Hierarchy, then Highest Hours
+            
+            # Sort: Designation Hierarchy first, then Highest Hours
             res_plot = res_df.sort_values(['Designation_order', 'Hrs'], ascending=[True, False]).reset_index(drop=True)
-            results = res_plot.drop(columns=["Designation_order"]).to_dict(orient="records")
+            
+            # Prepare clean data for CSV (Remove the sorting helper column)
+            clean_res = res_plot.drop(columns=["Designation_order"])
+            results = clean_res.to_dict(orient="records")
             
             stats = {
                 "total": len(res_plot),
                 "avg": round(res_plot["Hrs"].mean(), 2),
                 "max_name": res_plot.loc[res_plot['Hrs'].idxmax()]['Name']
             }
-            res_plot.to_csv(os.path.join(OUTPUT_DIR, "summary.csv"), index=False)
+            
+            # -----------------------------------------------------
+            # SAVE SUMMARY CSV (With Month Header)
+            # -----------------------------------------------------
+            with open(os.path.join(OUTPUT_DIR, "summary.csv"), 'w', newline='', encoding='utf-8') as f:
+                f.write(f"Report Month: {report_month}\n")
+                clean_res.to_csv(f, index=False)
 
-            # Daily CSV generation
+            # -----------------------------------------------------
+            # GENERATE DAILY REPORT CSV (With Month Header)
+            # -----------------------------------------------------
             combined['date_bs'] = combined['date_ad'].apply(lambda x: nepali_datetime.date.from_datetime_date(x).strftime("%Y-%m-%d"))
             all_dates = sorted(combined['date_bs'].unique())
             daily_rows = []
+            
             for emp_id, g in combined.groupby("ID"):
                 info = emp_info.get(emp_id, {"Name": f"ID-{emp_id}", "Designation": "Others"})
                 row = {"ID": emp_id, "Name": info["Name"], "Designation": info["Designation"]}
                 total_m = 0
                 for d in all_dates: row[d] = 0
+                
                 for day, day_data in g.groupby(g['date_bs']):
                     dmins = 0
                     day_data = day_data.sort_values("dt")
@@ -190,51 +233,49 @@ def index():
                             if 0 < diff < 600: dmins += diff
                     row[day] = round(dmins, 2)
                     total_m += dmins
+                
                 row["Total Minutes"] = round(total_m, 2)
                 daily_rows.append(row)
+            
             daily_df = pd.DataFrame(daily_rows)
             daily_df['Designation_order'] = daily_df['Designation'].apply(lambda x: designation_order.index(x) if x in designation_order else len(designation_order))
             daily_df = daily_df.sort_values(['Designation_order', 'ID']).drop(columns=["Designation_order"])
-            daily_df.to_csv(os.path.join(OUTPUT_DIR, "daily_report.csv"), index=False)
+            
+            with open(os.path.join(OUTPUT_DIR, "daily_report.csv"), 'w', newline='', encoding='utf-8') as f:
+                f.write(f"Report Month: {report_month}\n")
+                daily_df.to_csv(f, index=False)
 
             # -----------------------------------------------------
-            # GRAPH GENERATION (Exactly matching the image)
+            # GRAPH GENERATION
             # -----------------------------------------------------
             plt.style.use('default')
-            # Extra wide figure to accommodate many bars
             dynamic_width = max(24, len(res_plot) * 0.6)
             fig, ax = plt.subplots(figsize=(dynamic_width, 8), dpi=150)
             
             colors = [colors_map.get(d, "#EFC050") for d in res_plot['Designation']]
             bars = ax.bar(range(len(res_plot)), res_plot["Hrs"], color=colors, width=0.6, zorder=3)
 
-            # X-axis labels (vertical like image)
             ax.set_xticks(range(len(res_plot)))
             ax.set_xticklabels(res_plot['ID'].astype(str), rotation=90, fontsize=9, color="#1e293b")
 
-            # Data labels on top of bars
             for i, bar in enumerate(bars):
                 height = bar.get_height()
                 ax.text(bar.get_x() + bar.get_width()/2., height + 1,
                         f'{height}', ha='center', va='bottom', 
                         fontsize=8, fontweight='800', color='#0f172a')
 
-            # Labels and styling
             ax.set_title(f"Employee Outside Time Breakdown – {report_month}", fontsize=20, fontweight='800', pad=60)
             ax.set_ylabel("Total Hours Outside", fontsize=10, fontweight='bold', color='#475569')
             ax.set_xlabel("Employee ID", fontsize=10, fontweight='bold', color='#475569')
 
-            # Gridlines (dashed horizontal only)
             ax.yaxis.grid(True, linestyle='--', color="#e2e8f0", alpha=0.7, zorder=0)
             ax.set_axisbelow(True)
 
-            # Remove top and right spines
             ax.spines['top'].set_visible(False)
             ax.spines['right'].set_visible(False)
             ax.spines['left'].set_color('#cbd5e1')
             ax.spines['bottom'].set_color('#cbd5e1')
 
-            # Legend on TOP
             legend_patches = [mpatches.Patch(color=colors_map[d], label=d) for d in designation_order if d in res_plot['Designation'].unique()]
             ax.legend(handles=legend_patches, loc='upper center', bbox_to_anchor=(0.5, 1.15), 
                       ncol=len(legend_patches), frameon=False, fontsize=10)
@@ -250,20 +291,39 @@ def employee_details(emp_id):
     month = request.args.get('month', '')
     report_path = os.path.join(OUTPUT_DIR, "daily_report.csv")
     if not os.path.exists(report_path): return redirect(url_for('index'))
-    df = pd.read_csv(report_path)
+    
+    # Read CSV skipping the first row because it contains "Report Month: ..."
+    df = pd.read_csv(report_path, skiprows=1)
+    
     emp_subset = df[df['ID'] == emp_id]
     if emp_subset.empty: return "Not Found", 404
     emp_row = emp_subset.iloc[0]
     cols = df.columns.tolist()
-    date_cols = cols[cols.index("Designation")+1 : cols.index("Total Minutes")]
+    
+    # Dynamic column indexing for dates
+    try:
+        start_idx = cols.index("Designation") + 1
+        end_idx = cols.index("Total Minutes")
+        date_cols = cols[start_idx:end_idx]
+    except ValueError:
+        date_cols = []
+
     daily_list = [{"date": d, "mins": emp_row[d], "hrs": round(emp_row[d]/60, 2)} for d in date_cols if emp_row[d] > 0]
-    summary = {"ID": emp_id, "Name": emp_row['Name'], "Designation": emp_row['Designation'], "TotalMins": emp_row['Total Minutes'], "TotalHrs": round(emp_row['Total Minutes']/60, 2)}
+    summary = {
+        "ID": emp_id, 
+        "Name": emp_row['Name'], 
+        "Designation": emp_row['Designation'], 
+        "TotalMins": emp_row['Total Minutes'], 
+        "TotalHrs": round(emp_row['Total Minutes']/60, 2)
+    }
     return render_template("index.html", employee_view=True, daily_list=daily_list, summary=summary, month=month)
 
 @app.route("/download/<f>")
 def download(f):
     m = {"csv": "summary.csv", "graph": "graph.png", "daily": "daily_report.csv"}
-    return send_file(os.path.join(OUTPUT_DIR, m[f]), as_attachment=True)
+    if f in m:
+        return send_file(os.path.join(OUTPUT_DIR, m[f]), as_attachment=True)
+    return "File not found", 404
     
 
 if __name__ == "__main__":
