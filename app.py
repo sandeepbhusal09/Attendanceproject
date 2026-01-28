@@ -11,12 +11,34 @@ import webbrowser
 from threading import Timer
 import matplotlib.patches as mpatches
 import datetime
-
+from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
+from werkzeug.security import generate_password_hash, check_password_hash
 # ---------------------------------------------------------
 # CONFIGURATION & MASTER DATA
 # ---------------------------------------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__, template_folder=BASE_DIR)
+# --- SECURITY SETUP ---
+app.secret_key = 'change_this_secret_key_randomly'  # Required for sessions
+
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
+
+# User Credentials (Username: admin, Password: password123)
+users_db = {
+    "admin": generate_password_hash("password123", method='pbkdf2:sha256')
+}
+
+class User(UserMixin):
+    def __init__(self, id):
+        self.id = id
+
+@login_manager.user_loader
+def load_user(user_id):
+    if user_id in users_db:
+        return User(user_id)
+    return None
 
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
 OUTPUT_DIR = os.path.join(BASE_DIR, "outputs")
@@ -163,8 +185,29 @@ def get_working_window(dt_obj):
 # ---------------------------------------------------------
 # ROUTES
 # ---------------------------------------------------------
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if current_user.is_authenticated:
+        return redirect(url_for('index'))
+    error = None
+    if request.method == "POST":
+        username = request.form.get("username")
+        password = request.form.get("password")
+        if username in users_db and check_password_hash(users_db[username], password):
+            login_user(User(username))
+            return redirect(url_for('index'))
+        else:
+            error = "Invalid Username or Password"
+    return render_template("login.html", error=error)
+
+@app.route("/logout")
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for('login'))
 
 @app.route("/", methods=["GET", "POST"])
+@login_required
 def index():
     results, stats, report_month = None, {}, ""
     if request.method == "POST":
@@ -373,6 +416,7 @@ def index():
     return render_template("index.html", results=results, stats=stats, month=report_month, colors_map=colors_map)
 
 @app.route("/employee/<int:emp_id>")
+@login_required
 def employee_details(emp_id):
     month = request.args.get('month', '')
     report_path = os.path.join(OUTPUT_DIR, "daily_report.csv")
@@ -419,11 +463,20 @@ def employee_details(emp_id):
     return render_template("index.html", employee_view=True, daily_list=daily_list, summary=summary, month=month)
 
 @app.route("/download/<f>")
+@login_required 
 def download(f):
     m = {"csv": "summary.csv", "graph": "graph.png", "daily": "daily_report.csv", "breakdown": "detailed_breakdown.csv"}
     if f in m and os.path.exists(os.path.join(OUTPUT_DIR, m[f])):
         return send_file(os.path.join(OUTPUT_DIR, m[f]), as_attachment=True)
     return "File not found", 404
+        
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    # Change URL below to /login
+    Timer(1, lambda: webbrowser.open(f"http://127.0.0.1:{port}/login")).start() 
+    app.run(host="127.0.0.1", port=port, debug=True)
+
         
 
 if __name__ == "__main__":
