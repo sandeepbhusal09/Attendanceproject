@@ -1,3 +1,5 @@
+
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -27,7 +29,7 @@
 
         .btn { padding: 12px 28px; border-radius: 10px; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-block; transition: 0.2s; border: none; font-size: 14px; }
         .btn-brand { background: var(--brand); color: white; margin-top: 15px; }
-        .btn-outline { background: white; border: 1px solid var(--border); color: var(--text); margin-right: 10px; }
+        .btn-outline { background: white; border: 1px solid var(--border); color: var(--text); margin-right: 10px; margin-bottom: 10px; }
         .btn:hover { opacity: 0.9; transform: translateY(-1px); }
 
         .data-card { background: white; border-radius: 20px; border: 1px solid var(--border); overflow: hidden; box-shadow: 0 10px 15px rgba(0,0,0,0.05); margin-bottom: 40px; }
@@ -47,9 +49,21 @@
         .legend-color { width: 16px; height: 16px; margin-right: 6px; border-radius: 4px; }
         input[name="report_month"] { padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border); width: 200px; margin-bottom: 20px; font-size: 14px; }
         
-        /* Added simple link style */
         .name-link { color: inherit; text-decoration: none; border-bottom: 1px dashed var(--border); }
         .name-link:hover { color: var(--brand); border-bottom-color: var(--brand); }
+        
+        .detail-trigger { color: var(--brand); cursor: pointer; text-decoration: underline; }
+        .detail-trigger:hover { color: #3730a3; }
+
+        /* Modal Styles */
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); }
+        .modal-content { background-color: #fff; margin: 10% auto; padding: 25px; border-radius: 15px; width: 450px; max-width: 90%; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-bottom: 15px; }
+        .close { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
+        .close:hover { color: black; }
+        .breakdown-item { border-bottom: 1px solid #f1f5f9; padding: 10px 0; font-size: 13px; display: flex; justify-content: space-between; align-items: flex-start; }
+        .breakdown-item:last-child { border: none; }
+        .breakdown-note { font-size: 11px; color: var(--sub); display: block; margin-top: 2px; }
     </style>
 </head>
 <body>
@@ -94,7 +108,11 @@
                 {% for day in daily_list %}
                 <tr>
                     <td><strong>{{ day.date }}</strong></td>
-                    <td style="color: var(--sub);">{{ day.mins }} mins</td>
+                    <td>
+                        <span class="detail-trigger" onclick='showDetails("{{ day.date }}", {{ day.details | tojson }})'>
+                            {{ day.mins }} mins
+                        </span>
+                    </td>
                     <td style="font-weight: 700; color: var(--brand);">{{ day.hrs }} hrs</td>
                 </tr>
                 {% endfor %}
@@ -102,8 +120,55 @@
         </table>
     </div>
 
+    <!-- The Modal -->
+    <div id="detailModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 style="margin:0" id="modalDate">Details</h3>
+                <span class="close" onclick="closeModal()">&times;</span>
+            </div>
+            <div id="modalBody"></div>
+        </div>
+    </div>
+
+    <script>
+        function showDetails(date, details) {
+            document.getElementById('modalDate').innerText = "Logs for " + date;
+            const body = document.getElementById('modalBody');
+            body.innerHTML = "";
+            
+            if (!details || details.length === 0) {
+                body.innerHTML = "<p style='color:var(--sub); text-align:center;'>No countable intervals recorded.</p>";
+            } else {
+                details.forEach(item => {
+                    let div = document.createElement('div');
+                    div.className = 'breakdown-item';
+                    div.innerHTML = `
+                        <div>
+                            <strong>${item.time}</strong>
+                            <span class="breakdown-note">${item.note}</span>
+                        </div>
+                        <span style="font-weight:600; color:var(--brand); white-space:nowrap;">${item.dur} min</span>
+                    `;
+                    body.appendChild(div);
+                });
+            }
+            document.getElementById('detailModal').style.display = "block";
+        }
+
+        function closeModal() {
+            document.getElementById('detailModal').style.display = "none";
+        }
+        
+        window.onclick = function(event) {
+            if (event.target == document.getElementById('detailModal')) {
+                closeModal();
+            }
+        }
+    </script>
+
     {% else %}
-    <!-- MAIN DASHBOARD VIEW (ORIGINAL) -->
+    <!-- MAIN DASHBOARD VIEW -->
     <div class="upload-section">
         <form method="POST" enctype="multipart/form-data">
             <h3 style="margin: 0 0 10px;">Biometric Data Upload</h3>
@@ -139,9 +204,10 @@
     </div>
 
     <div class="actions-row">
-        <a href="/download/csv" class="btn btn-outline">📥 Download Summary CSV</a>
-        <a href="/download/graph" class="btn btn-outline">🖼️ Export Analytics Chart</a>
-        <a href="/download/daily" class="btn btn-outline">📊 Download Daily Report</a>
+        <a href="/download/csv" class="btn btn-outline">📥 Summary CSV</a>
+        <a href="/download/daily" class="btn btn-outline">📊 Daily Report</a>
+        <a href="/download/breakdown" class="btn btn-outline">🕒 Detailed Breakdown</a>
+        <a href="/download/graph" class="btn btn-outline">🖼️ Analytics Chart</a>
     </div>
 
     <div class="data-card">
@@ -160,7 +226,6 @@
                 {% for row in results %}
                 <tr>
                     <td><span class="badge">ID: {{ row.ID }}</span></td>
-                    <!-- CLICKABLE NAME LINK ADDED HERE -->
                     <td><a href="/employee/{{ row.ID }}?month={{ month }}" class="name-link"><strong>{{ row.Name }}</strong></a></td>
                     <td>{{ row.Designation }}</td>
                     <td>{{ row.Days }} Days</td>
