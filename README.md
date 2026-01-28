@@ -1,2 +1,8 @@
 # Attendanceproject
-This is our project done in LDC intern
+This project is about Attendance System to analyze the staff's total outside time during office hours.
+This project is the outcome of colaborative efforts form four team members:
+1. Preeti Adhikari
+2. Rohan Basnet
+3. Sandeep Bhusal
+4. Shrijhana Bhattarai
+This prject was done during the intern at Load Dispatch Centre(LDC).
