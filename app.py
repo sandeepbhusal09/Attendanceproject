@@ -480,7 +480,8 @@ if __name__ == "__main__":
         
 
 if __name__ == "__main__":
+    # Get the PORT from Render environment, default to 5000
     port = int(os.environ.get("PORT", 5000))
-    # Just run Flask normally, no automatic browser open
-    app.run(host="0.0.0.0", port=port, debug=True)
-
+    
+    # IMPORTANT: host must be "0.0.0.0" not "127.0.0.1"
+    app.run(host="0.0.0.0", port=port, debug=False)
