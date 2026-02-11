@@ -1,5 +1,3 @@
-
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -54,6 +52,8 @@
         
         .detail-trigger { color: var(--brand); cursor: pointer; text-decoration: underline; }
         .detail-trigger:hover { color: #3730a3; }
+        
+        .notes-text { font-size: 11px; color: #dc2626; margin-top: 5px; font-style: italic; }
 
         /* Modal Styles */
         .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); }
@@ -71,10 +71,7 @@
 <div class="container">
     <div class="header">
         <div class="logo"><a href="/" style="text-decoration:none; color:inherit;">Attendance<span>Dashboard</span></a></div>
-        
-        <!-- ADD THIS LINE BELOW -->
         <a href="/logout" style="color: #dc2626; text-decoration: none; font-weight: 600; border: 1px solid #fee2e2; padding: 6px 12px; border-radius: 6px; background: #fef2f2;">Log Out</a>
-        
     </div>
 
     {% if employee_view %}
@@ -86,6 +83,9 @@
     <div class="report-month">
         <h2>{{ summary.Name }} – {{ month }}</h2>
         <p style="color: var(--sub);">Employee ID: {{ summary.ID }} | {{ summary.Designation }}</p>
+        {% if summary.Notes %}
+            <p class="notes-text" style="text-align:center;">{{ summary.Notes }}</p>
+        {% endif %}
     </div>
 
     <div class="stats-grid">
@@ -179,7 +179,11 @@
             <p style="color: var(--sub); margin-bottom: 15px;">Enter the month for this report:</p>
             <input type="text" name="report_month" placeholder="e.g., January 2026" value="{{ month or '' }}">
             <p style="color: var(--sub); margin: 15px 0 25px;">Select Excel files to calculate outside durations.</p>
+            
             <input type="file" name="files" multiple accept=".xlsx">
+            
+            <p style="color: var(--sub); margin: 15px 0 5px; font-size:12px;">(Roster data is pre-configured)</p>
+            
             <br>
             <button type="submit" class="btn btn-brand">Generate Analytics Report</button>
         </form>
@@ -230,7 +234,12 @@
                 {% for row in results %}
                 <tr>
                     <td><span class="badge">ID: {{ row.ID }}</span></td>
-                    <td><a href="/employee/{{ row.ID }}?month={{ month }}" class="name-link"><strong>{{ row.Name }}</strong></a></td>
+                    <td>
+                        <a href="/employee/{{ row.ID }}?month={{ month }}" class="name-link"><strong>{{ row.Name }}</strong></a>
+                        {% if row.Notes %}
+                        <div class="notes-text" title="{{ row.Notes }}">⚠ Notes Available</div>
+                        {% endif %}
+                    </td>
                     <td>{{ row.Designation }}</td>
                     <td>{{ row.Days }} Days</td>
                     <td style="color: var(--sub);">{{ row.Mins }}</td>
